@@ -4,7 +4,44 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { WebSocketServer, WebSocket } = require('ws');
+const { Pool } = require('pg');
 
+const db = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false }
+    })
+  : null;
+
+async function prepareDatabase() {
+  if (!db) {
+    throw new Error('DATABASE_URL fehlt in den Render-Einstellungen.');
+  }
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS ludi_users (
+      id BIGSERIAL PRIMARY KEY,
+      username VARCHAR(18) NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS ludi_player_data (
+      user_id BIGINT PRIMARY KEY REFERENCES ludi_users(id)
+        ON DELETE CASCADE,
+      coins BIGINT NOT NULL DEFAULT 0,
+      talers BIGINT NOT NULL DEFAULT 0,
+      diamonds BIGINT NOT NULL DEFAULT 0,
+      inventory JSONB NOT NULL DEFAULT '[]'::jsonb,
+      unlocked_skins JSONB NOT NULL DEFAULT '[]'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  console.log('Lüdi-Datenbank ist vorbereitet.');
+}
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = '0.0.0.0';
 const MAX_PLAYERS = 12;
@@ -211,4 +248,7 @@ const heartbeat = setInterval(() => {
 }, 30000);
 server.on('close', () => clearInterval(heartbeat));
 server.listen(PORT, HOST, () => console.log(`Lüdi Island Clash Online Alpha läuft auf http://${HOST}:${PORT} (WebSocket /ws)`));
+prepareDatabase().catch(err => {
+  console.error('Datenbankfehler:', err.message);
+});
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
